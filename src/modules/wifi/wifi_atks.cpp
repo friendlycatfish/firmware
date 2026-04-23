@@ -277,7 +277,7 @@ bool wifi_atk_unsetWifi() {
 
 
 // --- TÍNH NĂNG 2: MENU MULTI-SELECT ---
-std::vector<wifi_ap_record_t> ap_records;
+
 std::vector<bool> multi_select_flags;
 std::vector<String> menu_strings;
 // --- TÍNH NĂNG 2: MENU MULTI-SELECT (BẢN CHUẨN KHÔNG LỖI RAM) ---
