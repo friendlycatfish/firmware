@@ -393,6 +393,7 @@ void multi_select_menu() {
             
             options.push_back({menu_strings.back().c_str(), [&, i]() {
                 multi_select_flags[i] = !multi_select_flags[i];
+                returnToMenu = true;
                 // Ép menu load lại để hiện dấu [X]
             }});
         }
