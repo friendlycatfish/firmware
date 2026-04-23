@@ -347,11 +347,13 @@ void deauthTop5Attack() {
 
 // --- TÍNH NĂNG 2: MENU MULTI-SELECT ---
 std::vector<bool> multi_select_flags;
+std::vector<String> menu_strings;
 void multi_select_menu() {
     displayTextLine("Scanning..");
     int nets = WiFi.scanNetworks(false, showHiddenNetworks);
     ap_records.clear();
     multi_select_flags.clear();
+    menu_strings.clear();
     
     for (int i = 0; i < nets; i++) {
         wifi_ap_record_t record;
@@ -362,45 +364,45 @@ void multi_select_menu() {
             strncpy((char *)record.ssid, WiFi.SSID(i).c_str(), sizeof(record.ssid) - 1);
         }
         ap_records.push_back(record);
-        multi_select_flags.push_back(false); // Mặc định là chưa chọn
+        multi_select_flags.push_back(false);
     }
 
     bool stayInMenu = true;
     while(stayInMenu) {
         options.clear();
+        menu_strings.clear(); // Xóa cũ làm mới
         
-        // Nút Kích hoạt tấn công (Luôn nằm đầu tiên)
+        // 1. Dòng kích hoạt
         options.push_back({"[ START ATTACK ]", [&]() {
             std::vector<wifi_ap_record_t> selected_targets;
             for(size_t i = 0; i < ap_records.size(); i++) {
                 if(multi_select_flags[i]) selected_targets.push_back(ap_records[i]);
             }
-            if(!selected_targets.empty()) {
-                execute_multi_deauth(selected_targets);
-            }
-            stayInMenu = false; // Thoát menu sau khi tấn công xong
+            if(!selected_targets.empty()) execute_multi_deauth(selected_targets);
+            stayInMenu = false;
         }});
 
-        // Vẽ danh sách WiFi với dấu Checkbox [X]
+        // 2. Danh sách WiFi
         for(size_t i = 0; i < ap_records.size(); i++) {
             String prefix = multi_select_flags[i] ? "[X] " : "[ ] ";
             String ssid_str = String((char*)ap_records[i].ssid);
             if(ssid_str.length() == 0) ssid_str = "Hidden";
-            String optName = prefix + ssid_str;
             
-            // Khi bấm vào 1 mạng, nó sẽ đảo ngược trạng thái đánh dấu và load lại Menu
-            options.push_back({optName.c_str(), [&, i]() {
+            // LƯU Ý: Phải đẩy vào vector menu_strings để giữ pointer không bị lỗi
+            menu_strings.push_back(prefix + ssid_str); 
+            
+            options.push_back({menu_strings.back().c_str(), [&, i]() {
                 multi_select_flags[i] = !multi_select_flags[i];
-                returnToMenu = true; 
+                // Ép menu load lại để hiện dấu [X]
             }});
         }
 
         addOptionToMainMenu();
-        loopOptions(options); // Render UI Menu
+        loopOptions(options); 
         
-        // Thoát nếu bấm Back
-        if (check(EscPress)) {
+        if (check(EscPress) || !stayInMenu) {
             stayInMenu = false;
+            returnToMenu = true;
         }
     }
 }
