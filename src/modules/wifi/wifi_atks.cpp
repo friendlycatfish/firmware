@@ -1192,3 +1192,8 @@ void beaconAttack() {
     }
     wifi_atk_unsetWifi();
 }
+extern "C" {
+    int __wrap_ieee80211_raw_frame_sanity_check(int32_t arg1, int32_t arg2, int32_t arg3) {
+        return 1; // Luôn trả về "Hợp lệ"
+    }
+}
