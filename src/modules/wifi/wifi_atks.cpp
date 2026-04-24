@@ -37,15 +37,15 @@ std::vector<wifi_ap_record_t> ap_records;
  * @see Project with original idea/implementation https://github.com/GANESH-ICMC/esp32-deauther
  */
 // --- NAGAMI ULTIMATE CORE ---
-typedef struct {
-    uint8_t frame_ctrl[2];
-    uint8_t duration[2];
-    uint8_t da[6];
-    uint8_t sa[6];
-    uint8_t bssid[6];
-    uint8_t seq[2];
-    uint8_t reason[2];
-} __attribute__((packed)) nagami_frame_t;
+// typedef struct {
+//     uint8_t frame_ctrl[2];
+//     uint8_t duration[2];
+//     uint8_t da[6];
+//     uint8_t sa[6];
+//     uint8_t bssid[6];
+//     uint8_t seq[2];
+//     uint8_t reason[2];
+// } __attribute__((packed)) nagami_frame_t;
 
 static uint16_t nagami_seq = 0; // Quản lý số thứ tự gói tin
 uint16_t nagami_reasons[] = {1, 4, 6, 7, 8, 39}; // Danh sách mã lỗi "hủy diệt"
