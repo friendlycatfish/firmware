@@ -954,7 +954,7 @@ void beaconSpamList(const char list[]) {
 
         i += j;
         index = (index + 1) % 64; 
-        if (check(EscPress)) break; [cite: 905]
+        if (check(EscPress)) break; 
     }
 }
 
