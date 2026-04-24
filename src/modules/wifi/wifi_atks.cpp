@@ -26,7 +26,7 @@ extern bool showHiddenNetworks;
 
 // Broadcast MAC for flood attacks
 const uint8_t _default_target[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
+static uint16_t bruce_seq_table[64] = {0};
 std::vector<wifi_ap_record_t> ap_records;
 
 /**
@@ -893,6 +893,19 @@ const char Beacons[] PROGMEM = {"Mom Use This One\n"
                                 "The Creep Next Door\n"
                                 "Ye Olde Internet\n"};
 
+const char random_storm_list[] PROGMEM = {
+    "HP_Setup_A1b2\n" "Android_9921\n" "DIRECT-L4-Echo\n"
+    "Hidden_Network\n" "TP-Link_Guest\n" "Xfinity_WiFi\n"
+    "iPhone_Pro_Max\n" "Linksys_0042\n" "Netgear_Ext\n"
+    "Cisco_Systems\n" "WiFi_Free_High\n" "DLink_615\n"
+    "Asus_Gaming_5G\n" "Belkin_Setup\n" "Tenda_F3\n"
+    "Mercusys_2024\n" "Home_WiFi_Secure\n" "Office_Guest\n"
+    "Public_Transit\n" "Coffee_Shop_Free\n" "Airport_Free_WiFi\n"
+    "Hotel_Premium\n" "Smart_TV_Sony\n" "Printer_Epson\n"
+    "Tesla_Model_3\n" "Starlink_Orbit\n" "Mesh_Node_01\n"
+    "Google_Home_Mini\n" "Alexa_Echo_Dot\n" "Ring_Doorbell\n"
+};
+
 const char rickrollssids[] PROGMEM = {"01 Never gonna give you up\n"
                                       "02 Never gonna let you down\n"
                                       "03 Never gonna run around\n"
@@ -906,17 +919,16 @@ void beaconSpamList(const char list[]) {
     uint8_t beaconPacket[BEACON_PKT_LEN];
     uint8_t macAddr[6];
     int i = 0;
+    int index = 0; 
     int ssidsLen = strlen_P(list);
 
-    // go to the next channel
-    nextChannel();
+    // Chốt kênh để tăng hỏa lực (Tùy chọn) [cite: 897]
+    // nextChannel(); 
 
     while (i < ssidsLen) {
-        // Read next SSID from PROGMEM up to newline
         char ssidBuf[32];
         int j = 0;
         char tmp;
-        // read chars from PROGMEM until newline
         do {
             tmp = pgm_read_byte(list + i + j);
             if (j < 32 && tmp != '\n') ssidBuf[j] = tmp;
@@ -925,19 +937,24 @@ void beaconSpamList(const char list[]) {
 
         uint8_t ssidLen = (j > 32) ? 32 : j - 1;
 
-        // generate MAC and prepare packet
-        generateRandomWiFiMac(macAddr);
+        generateRandomWiFiMac(macAddr); // Đổi MAC liên tục để tạo mạng mới [cite: 902]
         prepareBeaconPacket(beaconPacket, macAddr, ssidBuf, ssidLen, wifi_channel, true);
 
-        // send 2 packets instead of 3 (makes devices show more networks)
+        // --- CHÈN SEQUENCE ĐỂ CÓ EFFECT [cite: 885, 903] ---
+        bruce_seq_table[index] = (bruce_seq_table[index] + 1) % 4096;
+        uint16_t seq_val = (bruce_seq_table[index] << 4);
+        beaconPacket[22] = seq_val & 0xFF;
+        beaconPacket[23] = (seq_val >> 8) & 0xFF;
+        // ------------------------------------------------
+
         for (int k = 0; k < 2; k++) {
             esp_wifi_80211_tx(WIFI_IF_STA, beaconPacket, BEACON_PKT_LEN, 0);
             vTaskDelay(1 / portTICK_PERIOD_MS);
         }
 
-        // move cursor past the SSID and newline
         i += j;
-        if (EscPress) break;
+        index = (index + 1) % 64; 
+        if (check(EscPress)) break; [cite: 905]
     }
 }
 
@@ -1038,9 +1055,9 @@ void beaconAttack() {
         } else if (BeaconMode == 1) {
             beaconSpamList(rickrollssids);
         } else if (BeaconMode == 2) {
-            char *randoms = randomSSID();
-            beaconSpamList(randoms);
-        }
+    // Gọi hàm List với kho đạn Random tạo sẵn
+    beaconSpamList(random_storm_list); 
+}
 #if !defined(LITE_VERSION)
         else if (BeaconMode == 4) {
             beaconSpamSingle(singleSSID);
