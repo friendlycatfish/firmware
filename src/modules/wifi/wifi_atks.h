@@ -2,6 +2,7 @@
 #define __WIFI_ATKS_H__
 
 #include <WiFi.h>
+#include <vector> // Thêm thư viện vector cho execute_multi_bruce_style
 
 extern wifi_ap_record_t ap_record;
 
@@ -52,5 +53,10 @@ void capture_handshake(String tssid, String mac, uint8_t channel);
 void beaconAttack();
 
 void deauthFloodAttack();
+
+// --- CÁC HÀM MỚI ĐƯỢC THÊM VÀO ---
+void deauthTop5Attack();
+void deauthMultiAttack();
+void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets);
 
 #endif
