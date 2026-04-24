@@ -1088,9 +1088,11 @@ void beaconAttack() {
         }
 #endif
         if (check(EscPress) || returnToMenu) {
-            if (BeaconMode == 3) file.close();
-            break;
+            if (BeaconMode == 3 && file) file.close();
+            break; // Thoát vòng lặp spam
         }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
     wifi_atk_unsetWifi();
 }
